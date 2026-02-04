@@ -1,0 +1,11 @@
+akshay scan
+akshay akshay[0] --open
+akshay akshay[0] --decrypt
+
+akshay demo.akshay --open
+akshay demo.akshay --decrypt
+
+akshay create design
+akshay design.akshay --open
+
+akshay help

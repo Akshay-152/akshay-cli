@@ -1,0 +1,20 @@
+{
+  "name": "akshay-cli",
+  "version": "2.0.1",
+  "description": "Akshay CLI – .akshay file manager",
+  "bin": {
+    "akshay": "./bin/akshay-cli.js"
+  },
+  "author": "Akshay PK",
+  "license": "MIT",
+  "dependencies": {
+    "chalk": "^4.1.2",
+    "commander": "^11.1.0",
+    "figlet": "^1.7.0",
+    "boxen": "^5.1.2",
+    "ora": "^5.4.1",
+    "fs-extra": "^11.2.0",
+    "glob": "^8.1.0",
+    "cli-table3": "^0.6.3"
+  }
+}

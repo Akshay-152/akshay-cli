@@ -1,0 +1,685 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Akshay Secure Cloud Editor</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+body {
+  margin: 0;
+  background: #0b0f1a;
+  color: #fff;
+  font-family: Arial, sans-serif;
+}
+header {
+  padding: 14px;
+  background: #11162a;
+  text-align: center;
+  font-size: 20px;
+  font-weight: bold;
+}
+main {
+  padding: 15px;
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+.section {
+  background: #11162a;
+  padding: 15px;
+  border-radius: 10px;
+}
+textarea, input {
+  width: 100%;
+  background: #0f1530;
+  color: #00ffcc;
+  border: 1px solid #333;
+  border-radius: 8px;
+  padding: 10px;
+  font-family: monospace;
+  box-sizing: border-box;
+}
+textarea {
+  height: 140px;
+}
+button {
+  background: #2563eb;
+  color: #fff;
+  border: none;
+  padding: 8px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+  margin: 5px 5px 0 0;
+}
+button.secondary {
+  background: #444;
+}
+button.add-image-btn {
+  background: #7c3aed;
+}
+/* Canvas */
+#canvas {
+  position: relative;
+  width: 100%;
+  min-height: 600px;
+  background: #0f1530;
+  border-radius: 10px;
+  border: 1px solid #333;
+  margin-top: 10px;
+  overflow: hidden;
+}
+/* Image Block */
+.image-block {
+  position: absolute;
+  cursor: move;
+  z-index: 10;
+  user-select: none;
+  border: 2px solid transparent;
+  border-radius: 6px;
+  transition: border-color 0.2s;
+}
+.image-block:hover {
+  border-color: #2563eb;
+}
+.image-block img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  border-radius: 4px;
+  pointer-events: none;
+}
+.image-block.selected {
+  border-color: #00ffcc;
+  z-index: 100;
+}
+/* Resize Handle */
+.resize-handle {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  background: #00ffcc;
+  border: 2px solid #0b0f1a;
+  border-radius: 50%;
+  bottom: -6px;
+  right: -6px;
+  cursor: nwse-resize;
+  z-index: 11;
+}
+/* Toolbar */
+.toolbar {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+/* URL Input */
+.url-input-group {
+  display: flex;
+  gap: 10px;
+  margin-top: 10px;
+}
+.url-input-group input {
+  flex: 1;
+}
+</style>
+</head>
+<body>
+
+<header>🔐 Akshay Encrypted Cloud Editor with Canvas</header>
+
+<main>
+
+<div class="section">
+  <h3>Canvas (Drag images anywhere)</h3>
+  <div class="toolbar">
+    <button onclick="addImageBlock()" class="add-image-btn">+ Add Image</button>
+    <button onclick="addTextBlock()" class="secondary">+ Add Text</button>
+    <button onclick="addTableBlock()" class="secondary">+ Add Table</button>
+    <button onclick="deleteSelectedBlock()" class="secondary">Delete Selected</button>
+    <button onclick="clearCanvas()" class="secondary">Clear All</button>
+  </div>
+  
+  <div id="canvas"></div>
+  
+  <div class="url-input-group">
+    <input type="text" id="imageUrlInput" placeholder="Paste image URL (Cloudinary, imgur, etc.)">
+    <button onclick="addImageFromUrl()">Add from URL</button>
+  </div>
+</div>
+
+<div class="section">
+  <h3>File Operations</h3>
+  <div class="toolbar">
+    <button onclick="newFile()">New File</button>
+    <button onclick="openLocal()">Open File</button>
+    <button onclick="saveLocal()">Save File (.akshay)</button>
+    <button onclick="uploadCloud()">Upload to Cloud</button>
+    <input type="file" id="fileInput" accept=".akshay,.akshay.txt" style="display: none;">
+  </div>
+</div>
+
+<div class="section">
+  <h3>Cloud Operations</h3>
+  <div class="url-input-group">
+    <input type="text" id="urlInput" placeholder="Paste Cloudinary URL to open">
+    <button onclick="openFromURL()">Open from URL</button>
+  </div>
+  <textarea id="cloudUrl" placeholder="Cloudinary URL will appear here after upload" readonly></textarea>
+</div>
+
+<small>Encrypted • Cloud-shareable • Drag-anywhere images</small>
+
+</main>
+
+<script>
+// ================= BLOCK SYSTEM =================
+let blocks = [];
+let selectedBlockId = null;
+let nextBlockId = 1;
+
+// Block types
+const BLOCK_TYPES = {
+  IMAGE: 'image',
+  TEXT: 'text',
+  TABLE: 'table'
+};
+
+// ================= DRAG & RESIZE =================
+let dragState = {
+  isDragging: false,
+  isResizing: false,
+  blockId: null,
+  offsetX: 0,
+  offsetY: 0,
+  startX: 0,
+  startY: 0,
+  startWidth: 0,
+  startHeight: 0
+};
+
+function makeDraggable(blockElement, blockId) {
+  blockElement.addEventListener('mousedown', startDrag);
+  
+  function startDrag(e) {
+    if (e.target.classList.contains('resize-handle')) {
+      startResize(e, blockElement, blockId);
+      return;
+    }
+    
+    selectBlock(blockId);
+    dragState = {
+      isDragging: true,
+      isResizing: false,
+      blockId,
+      offsetX: e.offsetX,
+      offsetY: e.offsetY
+    };
+    
+    document.addEventListener('mousemove', drag);
+    document.addEventListener('mouseup', stopDrag);
+  }
+  
+  function drag(e) {
+    if (!dragState.isDragging) return;
+    
+    const block = blocks.find(b => b.id === dragState.blockId);
+    if (!block) return;
+    
+    const canvas = document.getElementById('canvas');
+    const canvasRect = canvas.getBoundingClientRect();
+    
+    const x = e.clientX - canvasRect.left - dragState.offsetX;
+    const y = e.clientY - canvasRect.top - dragState.offsetY;
+    
+    // Keep within canvas bounds
+    const maxX = canvasRect.width - block.width;
+    const maxY = canvasRect.height - block.height;
+    
+    block.x = Math.max(0, Math.min(maxX, x));
+    block.y = Math.max(0, Math.min(maxY, y));
+    
+    updateBlockPosition(block);
+  }
+  
+  function stopDrag() {
+    dragState.isDragging = false;
+    document.removeEventListener('mousemove', drag);
+    document.removeEventListener('mouseup', stopDrag);
+    saveBlocksToData();
+  }
+}
+
+function startResize(e, blockElement, blockId) {
+  e.stopPropagation();
+  selectBlock(blockId);
+  
+  const block = blocks.find(b => b.id === blockId);
+  if (!block) return;
+  
+  dragState = {
+    isDragging: false,
+    isResizing: true,
+    blockId,
+    startX: e.clientX,
+    startY: e.clientY,
+    startWidth: block.width,
+    startHeight: block.height
+  };
+  
+  document.addEventListener('mousemove', resize);
+  document.addEventListener('mouseup', stopResize);
+}
+
+function resize(e) {
+  if (!dragState.isResizing) return;
+  
+  const block = blocks.find(b => b.id === dragState.blockId);
+  if (!block) return;
+  
+  const dx = e.clientX - dragState.startX;
+  const dy = e.clientY - dragState.startY;
+  
+  // Minimum size
+  const minSize = 50;
+  
+  block.width = Math.max(minSize, dragState.startWidth + dx);
+  block.height = Math.max(minSize, dragState.startHeight + dy);
+  
+  updateBlockSize(block);
+}
+
+function stopResize() {
+  dragState.isResizing = false;
+  document.removeEventListener('mousemove', resize);
+  document.removeEventListener('mouseup', stopResize);
+  saveBlocksToData();
+}
+
+// ================= BLOCK MANAGEMENT =================
+function addImageBlock(url = 'https://images.unsplash.com/photo-1550745165-9bc0b252726f?w=300&h=200&fit=crop', x = 50, y = 50, width = 200, height = 150) {
+  const block = {
+    id: nextBlockId++,
+    type: BLOCK_TYPES.IMAGE,
+    x,
+    y,
+    width,
+    height,
+    data: { url }
+  };
+  
+  blocks.push(block);
+  renderBlock(block);
+  selectBlock(block.id);
+  saveBlocksToData();
+  return block;
+}
+
+function addTextBlock(content = 'Edit me!', x = 100, y = 100, width = 200, height = 100) {
+  const block = {
+    id: nextBlockId++,
+    type: BLOCK_TYPES.TEXT,
+    x,
+    y,
+    width,
+    height,
+    data: { content }
+  };
+  
+  blocks.push(block);
+  renderBlock(block);
+  selectBlock(block.id);
+  saveBlocksToData();
+  return block;
+}
+
+function addTableBlock(rows = 2, cols = 2, x = 300, y = 100, width = 300, height = 200) {
+  const tableData = [];
+  for (let i = 0; i < rows; i++) {
+    tableData.push(Array(cols).fill('Cell'));
+  }
+  
+  const block = {
+    id: nextBlockId++,
+    type: BLOCK_TYPES.TABLE,
+    x,
+    y,
+    width,
+    height,
+    data: { rows: tableData }
+  };
+  
+  blocks.push(block);
+  renderBlock(block);
+  selectBlock(block.id);
+  saveBlocksToData();
+  return block;
+}
+
+function renderBlock(block) {
+  const canvas = document.getElementById('canvas');
+  
+  // Remove existing block element if it exists
+  const existing = document.getElementById(`block-${block.id}`);
+  if (existing) existing.remove();
+  
+  const blockElement = document.createElement('div');
+  blockElement.id = `block-${block.id}`;
+  blockElement.className = 'image-block';
+  blockElement.style.left = block.x + 'px';
+  blockElement.style.top = block.y + 'px';
+  blockElement.style.width = block.width + 'px';
+  blockElement.style.height = block.height + 'px';
+  
+  if (block.type === BLOCK_TYPES.IMAGE) {
+    const img = document.createElement('img');
+    img.src = block.data.url;
+    img.alt = 'Image block';
+    blockElement.appendChild(img);
+  } 
+  else if (block.type === BLOCK_TYPES.TEXT) {
+    blockElement.style.background = '#1a237e';
+    blockElement.style.padding = '10px';
+    blockElement.style.color = 'white';
+    blockElement.style.overflow = 'auto';
+    blockElement.contentEditable = true;
+    blockElement.textContent = block.data.content;
+    
+    blockElement.addEventListener('input', () => {
+      block.data.content = blockElement.textContent;
+      saveBlocksToData();
+    });
+  }
+  else if (block.type === BLOCK_TYPES.TABLE) {
+    blockElement.style.background = '#1b5e20';
+    blockElement.style.padding = '10px';
+    blockElement.style.color = 'white';
+    blockElement.style.overflow = 'auto';
+    
+    const table = document.createElement('table');
+    table.style.width = '100%';
+    table.style.borderCollapse = 'collapse';
+    
+    block.data.rows.forEach((row, rowIndex) => {
+      const tr = document.createElement('tr');
+      row.forEach((cell, cellIndex) => {
+        const td = document.createElement('td');
+        td.contentEditable = true;
+        td.style.border = '1px solid #ccc';
+        td.style.padding = '5px';
+        td.textContent = cell;
+        
+        td.addEventListener('input', () => {
+          block.data.rows[rowIndex][cellIndex] = td.textContent;
+          saveBlocksToData();
+        });
+        
+        tr.appendChild(td);
+      });
+      table.appendChild(tr);
+    });
+    
+    blockElement.appendChild(table);
+  }
+  
+  // Add resize handle
+  const resizeHandle = document.createElement('div');
+  resizeHandle.className = 'resize-handle';
+  blockElement.appendChild(resizeHandle);
+  
+  canvas.appendChild(blockElement);
+  makeDraggable(blockElement, block.id);
+  
+  // Click to select
+  blockElement.addEventListener('click', (e) => {
+    if (e.target === resizeHandle) return;
+    selectBlock(block.id);
+  });
+}
+
+function updateBlockPosition(block) {
+  const element = document.getElementById(`block-${block.id}`);
+  if (element) {
+    element.style.left = block.x + 'px';
+    element.style.top = block.y + 'px';
+  }
+}
+
+function updateBlockSize(block) {
+  const element = document.getElementById(`block-${block.id}`);
+  if (element) {
+    element.style.width = block.width + 'px';
+    element.style.height = block.height + 'px';
+  }
+}
+
+function selectBlock(blockId) {
+  // Deselect all
+  document.querySelectorAll('.image-block').forEach(el => {
+    el.classList.remove('selected');
+  });
+  
+  // Select new
+  const element = document.getElementById(`block-${blockId}`);
+  if (element) {
+    element.classList.add('selected');
+    selectedBlockId = blockId;
+  } else {
+    selectedBlockId = null;
+  }
+}
+
+function deleteSelectedBlock() {
+  if (!selectedBlockId) return;
+  
+  blocks = blocks.filter(block => block.id !== selectedBlockId);
+  const element = document.getElementById(`block-${selectedBlockId}`);
+  if (element) element.remove();
+  selectedBlockId = null;
+  saveBlocksToData();
+}
+
+function clearCanvas() {
+  if (!confirm('Clear entire canvas?')) return;
+  blocks = [];
+  document.getElementById('canvas').innerHTML = '';
+  selectedBlockId = null;
+  saveBlocksToData();
+}
+
+function addImageFromUrl() {
+  const url = document.getElementById('imageUrlInput').value.trim();
+  if (!url) {
+    alert('Please enter an image URL');
+    return;
+  }
+  
+  addImageBlock(url);
+  document.getElementById('imageUrlInput').value = '';
+}
+
+// ================= ENCRYPTION =================
+const LDEF_KEY = "AKSHAY_LDEF_2026";
+
+function encrypt(text) {
+  let out = "";
+  for (let i = 0; i < text.length; i++) {
+    out += String.fromCharCode(
+      text.charCodeAt(i) ^ LDEF_KEY.charCodeAt(i % LDEF_KEY.length)
+    );
+  }
+  return btoa(out);
+}
+
+function decrypt(encoded) {
+  const text = atob(encoded);
+  let out = "";
+  for (let i = 0; i < text.length; i++) {
+    out += String.fromCharCode(
+      text.charCodeAt(i) ^ LDEF_KEY.charCodeAt(i % LDEF_KEY.length)
+    );
+  }
+  return out;
+}
+
+// ================= FILE OPERATIONS =================
+function collectData() {
+  return {
+    v: 2, // Version 2: Block-based system
+    blocks: blocks,
+    nextBlockId: nextBlockId
+  };
+}
+
+function loadData(data) {
+  if (data.v === 2) {
+    // New block-based format
+    blocks = data.blocks || [];
+    nextBlockId = data.nextBlockId || 1;
+    
+    // Clear canvas and re-render
+    document.getElementById('canvas').innerHTML = '';
+    blocks.forEach(block => renderBlock(block));
+  } else {
+    // Old format (convert to blocks)
+    blocks = [];
+    nextBlockId = 1;
+    
+    if (data.text) {
+      addTextBlock(data.text, 50, 50, 400, 150);
+    }
+    
+    if (data.table) {
+      const tableBlock = addTableBlock(data.table.length, data.table[0]?.length || 2, 50, 250, 400, 200);
+      tableBlock.data.rows = data.table;
+      renderBlock(tableBlock);
+    }
+  }
+}
+
+function newFile() {
+  if (!confirm('Create new file? Current work will be lost.')) return;
+  blocks = [];
+  nextBlockId = 1;
+  document.getElementById('canvas').innerHTML = '';
+  selectedBlockId = null;
+  document.getElementById('cloudUrl').value = '';
+}
+
+function saveLocal() {
+  const encrypted = encrypt(JSON.stringify(collectData()));
+  const blob = new Blob([encrypted], { type: "application/octet-stream" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "document.akshay";
+  a.click();
+}
+
+function openLocal() {
+  document.getElementById("fileInput").click();
+}
+
+document.getElementById("fileInput").onchange = e => {
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      loadData(JSON.parse(decrypt(reader.result)));
+    } catch {
+      alert("Invalid or corrupted Akshay file");
+    }
+  };
+  reader.readAsText(e.target.files[0]);
+};
+
+function saveBlocksToData() {
+  // Auto-save to localStorage for quick recovery
+  localStorage.setItem('akshay_autosave', JSON.stringify(collectData()));
+}
+
+function loadAutosave() {
+  const saved = localStorage.getItem('akshay_autosave');
+  if (saved) {
+    try {
+      loadData(JSON.parse(saved));
+      console.log('Loaded autosave');
+    } catch (e) {
+      console.log('No valid autosave found');
+    }
+  }
+}
+
+// ================= CLOUDINARY =================
+async function uploadCloud() {
+  const encrypted = encrypt(JSON.stringify(collectData()));
+  const file = new Blob([encrypted], { type: "application/octet-stream" });
+
+  const cloudNames = ["de7bwqvq5"];
+  const cloud = cloudNames[Math.floor(Math.random() * cloudNames.length)];
+
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("upload_preset", "myupload");
+
+  try {
+    const res = await fetch(
+      `https://api.cloudinary.com/v1_1/${cloud}/raw/upload`,
+      { method: "POST", body: formData }
+    );
+
+    const data = await res.json();
+    document.getElementById("cloudUrl").value = data.secure_url || "Upload failed";
+  } catch (error) {
+    alert("Upload failed: " + error.message);
+  }
+}
+
+async function openFromURL() {
+  const url = document.getElementById("urlInput").value;
+  if (!url) return;
+
+  try {
+    const res = await fetch(url);
+    const encrypted = await res.text();
+    loadData(JSON.parse(decrypt(encrypted)));
+  } catch {
+    alert("Invalid or corrupted cloud file");
+  }
+}
+
+// ================= INITIALIZATION =================
+window.addEventListener('DOMContentLoaded', () => {
+  // Add some sample blocks on first load
+  if (blocks.length === 0) {
+    addImageBlock('https://images.unsplash.com/photo-1550745165-9bc0b252726f?w=300&h=200&fit=crop', 50, 50, 200, 150);
+    addTextBlock('Welcome to Akshay Editor!\n\nDrag images anywhere.\nDouble-click to edit text.', 300, 50, 300, 150);
+    addTableBlock(3, 2, 50, 250, 400, 200);
+  }
+  
+  // Try to load autosave
+  loadAutosave();
+  
+  // Auto-save every 30 seconds
+  setInterval(saveBlocksToData, 30000);
+});
+
+// ================= KEYBOARD SHORTCUTS =================
+document.addEventListener('keydown', (e) => {
+  // Delete selected block with Delete key
+  if (e.key === 'Delete' && selectedBlockId) {
+    deleteSelectedBlock();
+  }
+  
+  // New file with Ctrl+N
+  if (e.ctrlKey && e.key === 'n') {
+    e.preventDefault();
+    newFile();
+  }
+  
+  // Save with Ctrl+S
+  if (e.ctrlKey && e.key === 's') {
+    e.preventDefault();
+    saveLocal();
+  }
+});
+</script>
+</body>
+</html>
