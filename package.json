@@ -1,6 +1,6 @@
 {
   "name": "akshay-cli",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Akshay CLI – Manage .akshay files",
   "bin": {
     "akshay": "./bin/akshay-cli.js"
